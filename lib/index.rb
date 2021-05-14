@@ -38,6 +38,8 @@ def create_check
   puts path, body, @headers
 
   resp = http.post(path, body.to_json, @headers)
+  
+  p resp
 
   raise resp.message if resp.code.to_i >= 300
 
