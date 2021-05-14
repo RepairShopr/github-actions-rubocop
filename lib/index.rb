@@ -34,6 +34,8 @@ def create_check
   http = Net::HTTP.new('api.github.com', 443)
   http.use_ssl = true
   path = "/repos/#{@owner}/#{@repo}/check-runs"
+  
+  puts path, body, @headers
 
   resp = http.post(path, body.to_json, @headers)
 
