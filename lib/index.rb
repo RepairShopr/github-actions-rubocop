@@ -91,15 +91,11 @@ def run_rubocop
   puts "Modified files of this commit: \n#{changed_files.join("\n")}\n"
   changed_files.delete_if{ |filename| filename[-3..-1] != '.rb' }
 
-  changed_files = ["app/models/new_account_lead.rb", "config/routes.rb", "spec/requests/new_account_leads_spec.rb"]
-
   if changed_files.length > 0
     puts "Running rubocop on these files: #{changed_files}"
     Dir.chdir(@GITHUB_WORKSPACE) do
       # only run rubocop on changes files
-      output_text = `rubocop --format json #{changed_files.join(' ')}`
-      puts output_text.inspect
-      errors = JSON.parse(output_text)
+      errors = JSON.parse(`rubocop --format json #{changed_files.join(' ')}`)
     end
 
     errors['files'].each do |file|
