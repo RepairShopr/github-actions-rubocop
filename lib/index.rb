@@ -4,135 +4,134 @@ require 'net/http'
 require 'json'
 require 'time'
 
-@GITHUB_SHA        = ENV['GITHUB_SHA']
+@GITHUB_SHA = ENV['GITHUB_SHA']
 @GITHUB_EVENT_PATH = ENV['GITHUB_EVENT_PATH']
-@GITHUB_TOKEN      = ENV['GITHUB_TOKEN']
-@GITHUB_WORKSPACE  = ENV['GITHUB_WORKSPACE']
+@GITHUB_TOKEN = ENV['GITHUB_TOKEN']
+@GITHUB_WORKSPACE = ENV['GITHUB_WORKSPACE']
 
-@event      = JSON.parse(File.read(ENV['GITHUB_EVENT_PATH']))
+@event = JSON.parse(File.read(ENV['GITHUB_EVENT_PATH']))
 @repository = @event['repository']
-@owner      = @repository['owner']['login']
-@repo       = @repository['name']
+@owner = @repository['owner']['login']
+@repo = @repository['name']
 
 @check_name = 'Rubocop'
 
 @headers = {
-  "Content-Type":  'application/json',
-  "Accept":        'application/vnd.github.antiope-preview+json',
+  "Content-Type": 'application/json',
+  "Accept": 'application/vnd.github.antiope-preview+json',
   "Authorization": "Bearer #{@GITHUB_TOKEN}",
-  "User-Agent":    'github-actions-rubocop'
+  "User-Agent": 'github-actions-rubocop'
 }
-
-class GithubAPIError < StandardError; end
 
 def create_check
   body = {
-    'name'       => @check_name,
-    'head_sha'   => @GITHUB_SHA,
-    'status'     => 'in_progress',
+    'name' => @check_name,
+    'head_sha' => @GITHUB_SHA,
+    'status' => 'in_progress',
     'started_at' => Time.now.iso8601
   }
 
-  http         = Net::HTTP.new('api.github.com', 443)
+  http = Net::HTTP.new('api.github.com', 443)
   http.use_ssl = true
-  path         = "/repos/#{@owner}/#{@repo}/check-runs"
+  path = "/repos/#{@owner}/#{@repo}/check-runs"
 
   resp = http.post(path, body.to_json, @headers)
 
-  if resp.code.to_i >= 300
-    puts "[Github Create Check] Failed Posting to Github: #{resp.message}"
-    raise GithubAPIError.new(resp.message)
-  end
+  raise resp.message if resp.code.to_i >= 300
 
   data = JSON.parse(resp.body)
   data['id']
 end
 
 def update_check(id, conclusion, output)
-  puts "[#{id}] Updating check #{conclusion}"
   body = {
-    'name'         => @check_name,
-    'head_sha'     => @GITHUB_SHA,
-    'status'       => 'completed',
+    'name' => @check_name,
+    'head_sha' => @GITHUB_SHA,
+    'status' => 'completed',
     'completed_at' => Time.now.iso8601,
-    'conclusion'   => conclusion,
-    'output'       => output
+    'conclusion' => conclusion,
+    'output' => output
   }
 
-  http         = Net::HTTP.new('api.github.com', 443)
+  http = Net::HTTP.new('api.github.com', 443)
   http.use_ssl = true
-  path         = "/repos/#{@owner}/#{@repo}/check-runs/#{id}"
+  path = "/repos/#{@owner}/#{@repo}/check-runs/#{id}"
 
   resp = http.patch(path, body.to_json, @headers)
 
-  if resp.code.to_i >= 300
-    puts "[Github Update Check] Failed Posting to Github: #{resp.message}"
-    raise GithubAPIError.new(resp.message)
-  end
+  raise resp.message if resp.code.to_i >= 300
 end
 
 @annotation_levels = {
-  'refactor'   => 'failure',
+  'refactor' => 'failure',
   'convention' => 'failure',
-  'warning'    => 'warning',
-  'error'      => 'failure',
-  'fatal'      => 'failure'
+  'warning' => 'warning',
+  'error' => 'failure',
+  'fatal' => 'failure'
 }
 
 def run_rubocop
   annotations = []
-  errors      = nil
-  conclusion  = 'success'
-  count       = 0
-
+  errors = nil
   Dir.chdir(@GITHUB_WORKSPACE) do
     errors = JSON.parse(`rubocop --format json`)
   end
+  conclusion = 'success'
+  count = 0
 
   errors['files'].each do |file|
-    path     = file['path']
+    path = file['path']
     offenses = file['offenses']
 
     offenses.each do |offense|
-      severity         = offense['severity']
-      message          = offense['message']
-      location         = offense['location']
+      severity = offense['severity']
+      message = offense['message']
+      location = offense['location']
       annotation_level = @annotation_levels[severity]
-      count            += 1
+      count += 1
 
-      conclusion       = 'failure' if annotation_level == 'failure'
+      conclusion = 'failure' if annotation_level == 'failure'
 
       annotations.push(
-        'path'              => path,
-        'start_line'        => location['start_line'],
-        'end_line'          => location['start_line'],
+        'path' => path,
+        'start_line' => location['start_line'],
+        'end_line' => location['start_line'],
         "annotation_level": annotation_level,
-        'message'           => message
+        'message' => message
       )
     end
   end
 
   output = {
-    "title":      @check_name,
-    "summary":    "#{count} offense(s) found",
+    "title": @check_name,
+    "summary": "#{count} offense(s) found",
     'annotations' => annotations
   }
 
-  {'output' => output, 'conclusion' => conclusion}
+  { 'output' => output, 'conclusion' => conclusion }
 end
 
 def run
-  puts "\nStarting Rubocop..."
+  id = create_check
+  begin
+    results = run_rubocop
+    conclusion = results['conclusion']
+    output = results['output']
 
-  id         = create_check
-  results    = run_rubocop
-  conclusion = results['conclusion']
-  output     = results['output']
+    update_check(id, conclusion, output)
 
-  puts "Results:\n\n#{output.inspect}"
-
-  update_check(id, conclusion, output)
-  update_check(id, 'failure', nil) if conclusion == 'failure'
+    # Print offenses
+    if conclusion == 'failure'
+      puts output[:summary]
+      output['annotations'].each do |annotation|
+        puts "L#{annotation['start_line']}-L#{annotation['end_line']}:#{annotation['message']}"
+      end
+      raise 'Rubocop found offenses'
+    end
+  rescue StandardError
+    update_check(id, 'failure', nil)
+    raise
+  end
 end
 
 run
