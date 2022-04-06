@@ -124,7 +124,7 @@ def run
     if conclusion == 'failure'
       puts output[:summary]
       output['annotations'].each do |annotation|
-        puts "L#{annotation['start_line']}-L#{annotation['end_line']}:#{annotation['message']}"
+        puts "::error file=#{annotation['path']},line=#{annotation['start_line']},endLine=#{annotation['end_line']}::#{annotation['message']}"
       end
       raise 'Rubocop found offenses'
     end
